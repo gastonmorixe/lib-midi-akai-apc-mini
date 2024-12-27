@@ -1,11 +1,72 @@
 #include "apc_mini_controller.hpp"
+#include <sys/types.h>
+
+const std::vector<std::vector<int>> APCMiniController::GRID_LAYOUT = {
+    {56, 57, 58, 59, 60, 61, 62, 63}, // Row 1 (Top)
+    {48, 49, 50, 51, 52, 53, 54, 55}, // Row 2
+    {40, 41, 42, 43, 44, 45, 46, 47}, // Row 3
+    {32, 33, 34, 35, 36, 37, 38, 39}, // Row 4
+    {24, 25, 26, 27, 28, 29, 30, 31}, // Row 5
+    {16, 17, 18, 19, 20, 21, 22, 23}, // Row 6
+    {8, 9, 10, 11, 12, 13, 14, 15},   // Row 7
+    {0, 1, 2, 3, 4, 5, 6, 7}          // Row 8 (Bottom)
+};
+
+APCMiniController::ButtonType APCMiniController::getButtonType(int note) {
+  if (note >= 0 && note <= 63)
+    return ButtonType::GRID;
+  if (note >= 64 && note <= 71)
+    return ButtonType::HORIZONTAL;
+  if (note >= 82 && note <= 89)
+    return ButtonType::VERTICAL;
+  if (note == 98)
+    return ButtonType::SPECIAL;
+  throw std::runtime_error("Invalid note number");
+}
+
+std::string APCMiniController::buttonTypeToString(ButtonType type) {
+  switch (type) {
+  case ButtonType::GRID:
+    return "Grid";
+  case ButtonType::HORIZONTAL:
+    return "Horizontal";
+  case ButtonType::VERTICAL:
+    return "Vertical";
+  case ButtonType::SPECIAL:
+    return "Special";
+  default:
+    return "Unknown";
+  }
+}
+
+std::string APCMiniController::getButtonName(int note) {
+  if (note >= 0 && note <= 63) {
+    int row = note / 8;
+    int col = note % 8;
+    return "Grid[" + std::to_string(row) + "," + std::to_string(col) + "]";
+  }
+
+  static const std::map<int, std::string> buttonNames = {
+      {64, "Stop All"}, {65, "Left"},    {66, "Right"},   {67, "Up"},      {68, "Down"},    {69, "Volume"},
+      {70, "Pan"},      {71, "Send"},    {82, "Scene 1"}, {83, "Scene 2"}, {84, "Scene 3"}, {85, "Scene 4"},
+      {86, "Scene 5"},  {87, "Scene 6"}, {88, "Scene 7"}, {89, "Scene 8"}, {98, "Shift"}};
+
+  auto it = buttonNames.find(note);
+  return it != buttonNames.end() ? it->second : "Unknown";
+}
+
+std::string APCMiniController::getFaderName(int fader) {
+  if (fader == 56)
+    return "Master";
+  if (fader >= 48 && fader <= 55)
+    return "Track " + std::to_string(fader - 47);
+  return "Unknown Fader";
+}
 
 APCMiniController::APCMiniController() {
   try {
     midiIn = std::make_unique<RtMidiIn>();
     midiOut = std::make_unique<RtMidiOut>();
-
-    // Find AKAI APC MINI ports
     findAPCMiniPorts();
   } catch (RtMidiError &error) {
     error.printMessage();
@@ -19,6 +80,26 @@ APCMiniController::~APCMiniController() {
   }
 }
 
+void APCMiniController::setGridLED(int index, LedColor color) {
+  if (index < 0 || index > 63)
+    return;
+  int row = index / 8;
+  int col = index % 8;
+  int note = GRID_LAYOUT[row][col];
+
+  sendMidiMessage({0x90, static_cast<unsigned char>(note), static_cast<unsigned char>(color)});
+}
+
+void APCMiniController::setHorizontalLED(HorizontalButton button, RoundLedState state) {
+  sendMidiMessage({0x90, static_cast<unsigned char>(button),
+                   static_cast<unsigned char>(state == RoundLedState::BLINK ? 2 : (state == RoundLedState::ON ? 1 : 0))});
+}
+
+void APCMiniController::setVerticalLED(VerticalButton button, RoundLedState state) {
+  sendMidiMessage({0x90, static_cast<unsigned char>(button),
+                   static_cast<unsigned char>(state == RoundLedState::BLINK ? 2 : (state == RoundLedState::ON ? 1 : 0))});
+}
+
 bool APCMiniController::connect() {
   if (inputPort == -1 || outputPort == -1) {
     std::cerr << "APC Mini ports not found!" << std::endl;
@@ -28,10 +109,7 @@ bool APCMiniController::connect() {
   try {
     midiIn->openPort(inputPort);
     midiOut->openPort(outputPort);
-
-    // Don't ignore sysex, timing, or active sensing messages
     midiIn->ignoreTypes(false, false, false);
-
     return true;
   } catch (RtMidiError &error) {
     error.printMessage();
@@ -42,73 +120,27 @@ bool APCMiniController::connect() {
 void APCMiniController::start() {
   if (isRunning)
     return;
-
   isRunning = true;
-  midiThread = std::thread(&APCMiniController::midiInputLoop, this);
+  midiInThread = std::thread(&APCMiniController::midiInputLoop, this);
+  midiOutThread = std::thread(&APCMiniController::midiOutputLoop, this);
 }
 
 void APCMiniController::stop() {
   if (!isRunning)
     return;
-
   isRunning = false;
-  if (midiThread.joinable()) {
-    midiThread.join();
-  }
+  queueCV.notify_all();
+  if (midiInThread.joinable())
+    midiInThread.join();
+  if (midiOutThread.joinable())
+    midiOutThread.join();
 }
 
-// void APCMiniController::setClipLED(int index, LedColor color) {
-//   if (index < 0 || index > 63)
-//     return;
-//
-//   int row = index / 8;
-//   int col = index % 8;
-//
-//   std::vector<unsigned char> message = {0x90, // Note On
-//                                         static_cast<unsigned char>(0x35 + col + (row * 8)), static_cast<unsigned char>(color)};
-//
-//   midiOut->sendMessage(&message);
-// }
+void APCMiniController::setButtonCallback(ButtonCallback callback) { buttonCallback = callback; }
 
-void APCMiniController::setClipLED(int index, LedColor color) {
-  if (index < 0 || index > 63)
-    return;
-
-  // Calculate row and column
-  int row = index / 8; // 0-7 for the 8 rows
-  int col = index % 8; // 0-7 for the 8 columns
-
-  // According to the MIDI spec, button numbers start from the top row:
-  // row 0: 0,1,2,3,4,5,6,7
-  // row 1: 16,17,18,19,20,21,22,23
-  // row 2: 32,33,34,35,36,37,38,39
-  // and so on...
-  int note = col + (row * 16);
-
-  std::vector<unsigned char> message = {0x90, // Note On
-                                        static_cast<unsigned char>(note), static_cast<unsigned char>(color)};
-
-  midiOut->sendMessage(&message);
-}
-
-void APCMiniController::setFader(int index, int value) {
-  if (index < 0 || index > 8)
-    return;
-  if (value < 0 || value > 127)
-    return;
-
-  std::vector<unsigned char> message = {0xB0, // Control Change
-                                        static_cast<unsigned char>(48 + index), static_cast<unsigned char>(value)};
-
-  midiOut->sendMessage(&message);
-}
-
-void APCMiniController::setButtonCallback(std::function<void(int, bool)> callback) { buttonCallback = callback; }
-
-void APCMiniController::setFaderCallback(std::function<void(int, int)> callback) { faderCallback = callback; }
+void APCMiniController::setFaderCallback(FaderCallback callback) { faderCallback = callback; }
 
 void APCMiniController::findAPCMiniPorts() {
-  // Look for "APC MINI" in port names
   for (unsigned int i = 0; i < midiIn->getPortCount(); i++) {
     std::string portName = midiIn->getPortName(i);
     if (portName.find("APC MINI") != std::string::npos) {
@@ -126,6 +158,31 @@ void APCMiniController::findAPCMiniPorts() {
   }
 }
 
+void APCMiniController::midiOutputLoop() {
+  while (isRunning) {
+    MidiMessage msg;
+    {
+      std::unique_lock<std::mutex> lock(queueMutex);
+      if (midiOutQueue.empty()) {
+        queueCV.wait_for(lock, std::chrono::milliseconds(1));
+        continue;
+      }
+      msg = std::move(midiOutQueue.front());
+      midiOutQueue.pop();
+    }
+    midiOut->sendMessage(&msg.data);
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
+  }
+}
+
+void APCMiniController::sendMidiMessage(const std::vector<unsigned char> &message) {
+  {
+    std::lock_guard<std::mutex> lock(queueMutex);
+    midiOutQueue.push({message});
+  }
+  queueCV.notify_one();
+}
+
 void APCMiniController::midiInputLoop() {
   std::vector<unsigned char> message;
 
@@ -133,34 +190,27 @@ void APCMiniController::midiInputLoop() {
     message.clear();
     midiIn->getMessage(&message);
 
-    if (message.empty()) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      continue;
-    }
-
-    // Process MIDI message
-    if (message.size() >= 3) {
+    if (!message.empty() && message.size() >= 3) {
       unsigned char status = message[0] & 0xF0;
       unsigned char data1 = message[1];
       unsigned char data2 = message[2];
 
-      switch (status) {
-      case 0x90: // Note On/Off (buttons)
-        if (buttonCallback) {
-          buttonCallback(data1, data2 > 0);
+      if (status == 0x90 || status == 0x80) {
+        bool isPressed = (status == 0x90 && data2 > 0);
+        try {
+          ButtonType type = getButtonType(data1);
+          if (buttonCallback)
+            buttonCallback(type, data1, isPressed);
+          std::cout << "Button: " << buttonTypeToString(type) << " [" << static_cast<uint>(data1) << " " << getButtonName(data1) << "] "
+                    << (isPressed ? "pressed" : "released") << std::endl;
+        } catch (const std::runtime_error &) {
         }
-        break;
-
-      case 0xB0: // Control Change (faders)
-        if (faderCallback) {
-          // Convert CC number to fader index (48-56)
-          int faderIndex = data1 - 48;
-          if (faderIndex >= 0 && faderIndex <= 8) {
-            faderCallback(faderIndex, data2);
-          }
-        }
-        break;
+      } else if (status == 0xB0 && data1 >= 48 && data1 <= 56) {
+        if (faderCallback)
+          faderCallback(static_cast<Fader>(data1), data2);
+        std::cout << "Fader: (" << static_cast<uint>(data1) << ") " << getFaderName(data1) << " = " << static_cast<int>(data2) << std::endl;
       }
     }
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
   }
 }

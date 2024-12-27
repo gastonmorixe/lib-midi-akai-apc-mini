@@ -3,42 +3,76 @@
 
 #include <RtMidi.h>
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <queue>
 #include <string>
 #include <thread>
 #include <vector>
 
 class APCMiniController {
 public:
-  // LED colors for the clip launch grid
-  enum class LedColor {
-    OFF = 0,
-    GREEN = 1,
-    GREEN_BLINK = 2,
-    RED = 3,
-    RED_BLINK = 4,
-    YELLOW = 5,
-    YELLOW_BLINK = 6
+  enum class ButtonType {
+    GRID,       // 8x8 matrix (0-63)
+    HORIZONTAL, // Bottom row (64-71)
+    VERTICAL,   // Right column (82-89)
+    SPECIAL     // Button 98
   };
 
-  // Constructor & Destructor
+  enum class LedColor { OFF = 0, GREEN = 1, GREEN_BLINK = 2, RED = 3, RED_BLINK = 4, YELLOW = 5, YELLOW_BLINK = 6 };
+
+  enum class HorizontalButton { STOP_ALL = 64, LEFT = 65, RIGHT = 66, UP = 67, DOWN = 68, VOLUME = 69, PAN = 70, SEND = 71 };
+
+  enum class VerticalButton {
+    SCENE_1 = 82,
+    SCENE_2 = 83,
+    SCENE_3 = 84,
+    SCENE_4 = 85,
+    SCENE_5 = 86,
+    SCENE_6 = 87,
+    SCENE_7 = 88,
+    SCENE_8 = 89
+  };
+
+  enum class Fader {
+    TRACK_1 = 48,
+    TRACK_2 = 49,
+    TRACK_3 = 50,
+    TRACK_4 = 51,
+    TRACK_5 = 52,
+    TRACK_6 = 53,
+    TRACK_7 = 54,
+    TRACK_8 = 55,
+    MASTER = 56
+  };
+
+  enum class RoundLedState { OFF, ON, BLINK };
+
+  using ButtonCallback = std::function<void(ButtonType type, int note, bool isPressed)>;
+  using FaderCallback = std::function<void(Fader fader, int value)>;
+
   APCMiniController();
   ~APCMiniController();
 
-  // Connection management
   bool connect();
   void start();
   void stop();
 
-  // Control methods
-  void setClipLED(int index, LedColor color);
-  void setFader(int index, int value);
+  void setGridLED(int index, LedColor color);
+  void setHorizontalLED(HorizontalButton button, RoundLedState state);
+  void setVerticalLED(VerticalButton button, RoundLedState state);
 
-  // Callback registration
-  void setButtonCallback(std::function<void(int, bool)> callback);
-  void setFaderCallback(std::function<void(int, int)> callback);
+  void setButtonCallback(ButtonCallback callback);
+  void setFaderCallback(FaderCallback callback);
+
+  static ButtonType getButtonType(int note);
+  static std::string buttonTypeToString(ButtonType type);
+  static std::string getButtonName(int note);
+  static std::string getFaderName(int fader);
 
 private:
   std::unique_ptr<RtMidiIn> midiIn;
@@ -47,14 +81,25 @@ private:
   int outputPort = -1;
 
   std::atomic<bool> isRunning{false};
-  std::thread midiThread;
+  std::thread midiInThread;
+  std::thread midiOutThread;
 
-  std::function<void(int, bool)> buttonCallback;
-  std::function<void(int, int)> faderCallback;
+  ButtonCallback buttonCallback;
+  FaderCallback faderCallback;
 
-  // Private helper methods
+  struct MidiMessage {
+    std::vector<unsigned char> data;
+  };
+  std::queue<MidiMessage> midiOutQueue;
+  std::mutex queueMutex;
+  std::condition_variable queueCV;
+
   void findAPCMiniPorts();
   void midiInputLoop();
+  void midiOutputLoop();
+  void sendMidiMessage(const std::vector<unsigned char> &message);
+
+  static const std::vector<std::vector<int>> GRID_LAYOUT;
 };
 
 #endif // APC_MINI_CONTROLLER_HPP
