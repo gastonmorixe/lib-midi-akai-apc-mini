@@ -33,7 +33,7 @@ void APCMiniController::midiCallback(double, std::vector<unsigned char> *message
 }
 
 void APCMiniController::processCallback() {
-  std::cout << "ProcessCallback Thread ID: " << std::this_thread::get_id() << std::endl;
+  // std::cout << "ProcessCallback Thread ID: " << std::this_thread::get_id() << std::endl;
   while (isConnected()) {
     {
       std::unique_lock<std::mutex> lock(callbackMutex);

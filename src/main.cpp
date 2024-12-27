@@ -19,11 +19,11 @@ int main() {
 
     std::unordered_map<int, bool> buttonStates;
 
-    std::cout << "main() Thread ID: " << std::this_thread::get_id() << std::endl;
+    // std::cout << "main() Thread ID: " << std::this_thread::get_id() << std::endl;
 
     controller.setButtonCallback(
         [&controller, &patternController, &buttonStates](APCMiniController::ButtonType type, int note, bool isPressed) {
-          std::cout << "setButtonCallback Thread ID: " << std::this_thread::get_id() << std::endl;
+          // std::cout << "setButtonCallback Thread ID: " << std::this_thread::get_id() << std::endl;
 
           if (type == APCMiniController::ButtonType::HORIZONTAL) {
             if (isPressed) {
