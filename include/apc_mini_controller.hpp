@@ -2,14 +2,8 @@
 #define APC_MINI_CONTROLLER_HPP
 
 #include <RtMidi.h>
-#include <atomic>
-#include <condition_variable>
 #include <functional>
-#include <iostream>
-#include <map>
 #include <memory>
-#include <mutex>
-#include <queue>
 #include <string>
 #include <thread>
 #include <vector>
@@ -59,15 +53,15 @@ public:
   ~APCMiniController();
 
   bool connect();
-  void start();
-  void stop();
+  void disconnect();
+  bool isConnected() const { return midiIn && midiIn->isPortOpen(); }
 
   void setGridLED(int index, LedColor color);
   void setHorizontalLED(HorizontalButton button, RoundLedState state);
   void setVerticalLED(VerticalButton button, RoundLedState state);
 
-  void setButtonCallback(ButtonCallback callback);
-  void setFaderCallback(FaderCallback callback);
+  void setButtonCallback(ButtonCallback callback) { buttonCallback = callback; }
+  void setFaderCallback(FaderCallback callback) { faderCallback = callback; }
 
   static ButtonType getButtonType(int note);
   static std::string buttonTypeToString(ButtonType type);
@@ -75,31 +69,24 @@ public:
   static std::string getFaderName(int fader);
 
 private:
+  std::unique_ptr<std::thread> callbackThread;
+  std::function<void()> pendingCallback;
+  std::mutex callbackMutex;
+  std::condition_variable callbackCV;
+
+  static void midiCallback(double timeStamp, std::vector<unsigned char> *message, void *userData);
+  void processCallback();
+
   std::unique_ptr<RtMidiIn> midiIn;
   std::unique_ptr<RtMidiOut> midiOut;
-  int inputPort = -1;
-  int outputPort = -1;
-
-  std::atomic<bool> isRunning{false};
-  std::thread midiInThread;
-  std::thread midiOutThread;
-
   ButtonCallback buttonCallback;
   FaderCallback faderCallback;
 
-  struct MidiMessage {
-    std::vector<unsigned char> data;
-  };
-  std::queue<MidiMessage> midiOutQueue;
-  std::mutex queueMutex;
-  std::condition_variable queueCV;
-
-  void findAPCMiniPorts();
-  void midiInputLoop();
-  void midiOutputLoop();
+  void handleMidiMessage(const std::vector<unsigned char> &message);
   void sendMidiMessage(const std::vector<unsigned char> &message);
+  bool findAndOpenPorts();
 
   static const std::vector<std::vector<int>> GRID_LAYOUT;
 };
 
-#endif // APC_MINI_CONTROLLER_HPP
+#endif
