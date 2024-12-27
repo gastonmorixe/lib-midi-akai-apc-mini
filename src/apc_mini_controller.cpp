@@ -1,4 +1,4 @@
-#include "../include/apc_mini_controller.hpp"
+#include "apc_mini_controller.hpp"
 
 APCMiniController::APCMiniController() {
   try {
@@ -57,15 +57,36 @@ void APCMiniController::stop() {
   }
 }
 
+// void APCMiniController::setClipLED(int index, LedColor color) {
+//   if (index < 0 || index > 63)
+//     return;
+//
+//   int row = index / 8;
+//   int col = index % 8;
+//
+//   std::vector<unsigned char> message = {0x90, // Note On
+//                                         static_cast<unsigned char>(0x35 + col + (row * 8)), static_cast<unsigned char>(color)};
+//
+//   midiOut->sendMessage(&message);
+// }
+
 void APCMiniController::setClipLED(int index, LedColor color) {
   if (index < 0 || index > 63)
     return;
 
-  int row = index / 8;
-  int col = index % 8;
+  // Calculate row and column
+  int row = index / 8; // 0-7 for the 8 rows
+  int col = index % 8; // 0-7 for the 8 columns
+
+  // According to the MIDI spec, button numbers start from the top row:
+  // row 0: 0,1,2,3,4,5,6,7
+  // row 1: 16,17,18,19,20,21,22,23
+  // row 2: 32,33,34,35,36,37,38,39
+  // and so on...
+  int note = col + (row * 16);
 
   std::vector<unsigned char> message = {0x90, // Note On
-                                        static_cast<unsigned char>(0x35 + col + (row * 8)), static_cast<unsigned char>(color)};
+                                        static_cast<unsigned char>(note), static_cast<unsigned char>(color)};
 
   midiOut->sendMessage(&message);
 }

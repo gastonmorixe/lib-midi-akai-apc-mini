@@ -33,6 +33,7 @@ endif()
 add_executable(apc_mini_controller 
     src/main.cpp
     src/apc_mini_controller.cpp
+    src/light_pattern_controller.cpp
 )
 
 # Include directories
