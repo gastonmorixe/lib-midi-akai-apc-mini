@@ -1,4 +1,4 @@
-# AKAI APC Mini Controller Library
+# AKAI APC Mini Controller C++ Library
 
 A modern C++ library for controlling the AKAI APC Mini MIDI controller. This library provides a complete interface for handling button inputs, LED control, and fader movements, making it perfect for creating custom light shows, MIDI applications, or integrating the APC Mini into your C++ projects.
 
