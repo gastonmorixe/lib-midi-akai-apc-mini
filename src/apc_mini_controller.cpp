@@ -20,12 +20,7 @@ APCMiniController::APCMiniController() {
   }
 }
 
-APCMiniController::~APCMiniController() {
-  disconnect();
-  if (callbackThread && callbackThread->joinable()) {
-    callbackThread->join();
-  }
-}
+APCMiniController::~APCMiniController() { disconnect(); }
 
 void APCMiniController::midiCallback(double, std::vector<unsigned char> *message, void *userData) {
   auto controller = static_cast<APCMiniController *>(userData);
@@ -106,6 +101,9 @@ void APCMiniController::disconnect() {
     midiIn->closePort();
   if (midiOut)
     midiOut->closePort();
+  if (callbackThread && callbackThread->joinable()) {
+    callbackThread->join();
+  }
 }
 
 // In sync
