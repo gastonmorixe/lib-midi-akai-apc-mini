@@ -12,6 +12,9 @@ A modern C++ library for controlling the AKAI APC Mini MIDI controller. This lib
 - 🧵 Thread-safe implementation
 - 🎯 Easy-to-use callback system
 
+![image](https://github.com/user-attachments/assets/59f58f99-4646-4aa1-8b26-f42721494bf3)
+
+
 ## Requirements
 
 - CMake 3.15 or higher
